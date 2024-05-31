@@ -45,7 +45,7 @@ install_packages() {
     apt-get install -y apache2 mariadb-server \
     php libapache2-mod-php php-intl php-mysqli php-gd \
     php-curl php-imap php-mailparse libapache2-mod-md \
-    certbot python3-certbot-apache git sudo
+    certbot python3-certbot-apache git sudo ufw
 
     mariadb_secure_installation
 
@@ -62,6 +62,13 @@ modify_php_ini() {
 
     sed -i 's/^;\?upload_max_filesize =.*/upload_max_filesize = 500M/' $PHP_INI_PATH
     sed -i 's/^;\?post_max_size =.*/post_max_size = 500M/' $PHP_INI_PATH
+}
+
+setup_ufw() {
+    ufw allow https
+    ufw allow http
+    ufw allow ssh
+    ufw enable
 }
 
 setup_webroot() {
@@ -129,6 +136,8 @@ echo "#############################################"
 echo ""
 echo "Please follow the prompts to complete the installation."
 echo ""
+echo "Please note, UFW will be setup during the installation, restricting access to HTTP, HTTPS, and SSH."
+echo ""
 
 # Execution begins here
 check_root
@@ -142,6 +151,9 @@ install_packages
 
 echo -e "\n${GREEN}Step 3: Modifying PHP configurations...${NC}"
 modify_php_ini
+
+echo -e "\n${GREEN}Step 4. Setting up ufw"
+setup_ufw
 
 echo -e "\n${GREEN}Step 4: Setting up webroot...${NC}"
 setup_webroot
