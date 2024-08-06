@@ -1,60 +1,105 @@
 #!/bin/bash
 
-# Colors
+# Colors for terminal output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Log file path
+LOG_FILE="/var/log/itflow_install.log"
+# Clear previous installation log
+rm -f "$LOG_FILE"  # Delete the previous log file
+
+# Function to log messages
+log() {
+    echo "$(date): $1" >> "$LOG_FILE"
+}
+
+# Function to show progress messages
+show_progress() {
+    echo -e "${GREEN}$1${NC}"
+}
 
 # Check if the user is root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
+        log "Error: This script must be run as root."
         echo -e "${RED}Error: This script must be run as root.${NC}"
         exit 1
     fi
 }
 
-# Check OS
+# Check if the OS is supported
 check_os() {
-    if ! grep -E "24.04|12" "/etc/"*"release" &>/dev/null; then
-        echo -e "${RED}Error: This script only supports Ubuntu 24.04 or Debian 12.${NC}"
+   if ! grep -E "22.04|24.04|12" "/etc/"*"release" &>/dev/null; then
+        log "Error: This script only supports Ubuntu 24.04 or Debian 12."
+        echo -e "${RED}Error: This script only supports Ubuntu 22.04 and 24.04 or Debian 12.${NC}"
         exit 1
     fi
 }
 
-# Set Correct Timezone
+# Function to install required packages
+install_packages() {
+    log "Installing packages"
+    show_progress "1. Installing packages..."
+    apt-get update >> "$LOG_FILE" 2>&1 && apt-get -y upgrade >> "$LOG_FILE" 2>&1
+    apt-get install -y apache2 mariadb-server \
+    php libapache2-mod-php php-intl php-mysqli php-gd \
+    php-curl php-imap php-mailparse libapache2-mod-md \
+    certbot python3-certbot-apache git sudo whois cron dnsutils expect >> "$LOG_FILE" 2>&1
+}
+
+# Function to check for required binaries
+check_required_binaries() {
+    log "Check packages"
+    show_progress "2. Check packages..."
+
+    local binaries=("dpkg-reconfigure" "a2ensite" "a2dissite" "a2enmod")
+
+    for bin in "${binaries[@]}"; do
+        if ! command -v $bin &> /dev/null; then
+            if [ -x "/usr/sbin/$bin" ]; then
+                export PATH="$PATH:/usr/sbin"
+            else
+                log "Error: $bin not found in PATH or /usr/sbin"
+                echo -e "${RED}Error: $bin not found. Please make sure it is installed and in your PATH or in /usr/sbin.${NC}"
+                exit 1
+            fi
+        fi
+    done
+}
+
+# Set the correct timezone
 set_timezone() {
+    log "Configuring timezone"
+    show_progress "3. Configuring timezone..."
     dpkg-reconfigure tzdata
-    clear
 }
 
 # Get domain name from user
 get_domain() {
     while [[ $domain != *[.]*[.]* ]]; do
-        echo -ne "Step 1: Please enter your Fully Qualified Domain (e.g., itflow.domain.com): "
+        echo -ne "${YELLOW}4. Enter your Fully Qualified Domain Name (e.g., itflow.domain.com): ${NC}"
         read domain
     done
+    log "Domain set to: $domain"
     echo -e "${GREEN}Domain set to: $domain${NC}"
 }
 
+# Generate random passwords
 generate_passwords() {
+    log "Generating passwords"
+    show_progress "5. Generating passwords..."
+    MARIADB_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | fold -w 20 | head -n 1)
     mariadbpwd=$(tr -dc 'A-Za-z0-9' < /dev/urandom | fold -w 20 | head -n 1)
     cronkey=$(tr -dc 'A-Za-z0-9' < /dev/urandom | fold -w 20 | head -n 1)
 }
 
-install_packages() {
-    apt-get update && apt-get -y upgrade
-    apt-get install -y apache2 mariadb-server \
-    php libapache2-mod-php php-intl php-mysqli php-gd \
-    php-curl php-imap php-mailparse libapache2-mod-md \
-    certbot python3-certbot-apache git sudo whois cron dnsutils
-
-    mariadb_secure_installation
-
-    a2enmod md
-    a2enmod ssl
-}
-
+# Modify PHP configuration
 modify_php_ini() {
+    log "Modifying php.ini"
+    show_progress "6. Configuring PHP..."
     # Get the PHP version
     PHP_VERSION=$(php -v | head -n 1 | awk '{print $2}' | cut -d '.' -f 1,2)
     
@@ -65,12 +110,22 @@ modify_php_ini() {
     sed -i 's/^;\?post_max_size =.*/post_max_size = 500M/' $PHP_INI_PATH
 }
 
+# Setup web root directory
 setup_webroot() {
+    log "Setting up webroot"
+    show_progress "7. Setting up webroot..."
     mkdir -p /var/www/${domain}
     chown -R www-data:www-data /var/www/
 }
 
+# Configure Apache
 setup_apache() {
+    log "Configuring Apache"
+    show_progress "8. Configuring Apache..."
+    
+    a2enmod md >> "$LOG_FILE" 2>&1
+    a2enmod ssl >> "$LOG_FILE" 2>&1
+    
     apache2_conf="<VirtualHost *:80>
     ServerAdmin webmaster@localhost
     ServerName ${domain}
@@ -81,24 +136,33 @@ setup_apache() {
 
     echo "${apache2_conf}" > /etc/apache2/sites-available/${domain}.conf
 
-    a2ensite ${domain}.conf
-    a2dissite 000-default.conf
-    systemctl restart apache2
+    a2ensite ${domain}.conf >> "$LOG_FILE" 2>&1
+    a2dissite 000-default.conf >> "$LOG_FILE" 2>&1
+    systemctl restart apache2 >> "$LOG_FILE" 2>&1
 
-    certbot --apache --non-interactive --agree-tos --register-unsafely-without-email --domains ${domain}
+    certbot --apache --non-interactive --agree-tos --register-unsafely-without-email --domains ${domain} >> "$LOG_FILE" 2>&1
 }
 
+# Clone ITFlow repository
 clone_itflow() {
-    git clone https://github.com/itflow-org/itflow.git /var/www/${domain}
+    log "Cloning ITFlow"
+    show_progress "9. Cloning ITFlow..."
+    git clone https://github.com/itflow-org/itflow.git /var/www/${domain} >> "$LOG_FILE" 2>&1
 }
 
+# Setup cron jobs
 setup_cronjobs() {
+    log "Setting up cron jobs"
+    show_progress "10. Setting up cron jobs..."
     (crontab -l 2>/dev/null; echo "0 2 * * * sudo -u www-data php /var/www/${domain}/cron.php ${cronkey}") | crontab -
     (crontab -l 2>/dev/null; echo "* * * * * sudo -u www-data php /var/www/${domain}/cron_ticket_email_parser.php ${cronkey}") | crontab -
     (crontab -l 2>/dev/null; echo "* * * * * sudo -u www-data php /var/www/${domain}/cron_mail_queue.php ${cronkey}") | crontab -
 }
 
+# Generate cron key file
 generate_cronkey_file() {
+    log "Generating cron key file"
+    show_progress "11. Generating cron key file..."
     mkdir -p /var/www/${domain}/uploads/tmp
     echo "<?php" > /var/www/${domain}/uploads/tmp/cronkey.php
     echo "\$itflow_install_script_generated_cronkey = \"${cronkey}\";" >> /var/www/${domain}/uploads/tmp/cronkey.php
@@ -106,63 +170,95 @@ generate_cronkey_file() {
     chown -R www-data:www-data /var/www/
 }
 
-setup_mysql() {
-    mysql -e "CREATE DATABASE itflow /*\!40100 DEFAULT CHARACTER SET utf8 */;"
-    mysql -e "CREATE USER itflow@localhost IDENTIFIED BY '${mariadbpwd}';"
-    mysql -e "GRANT ALL PRIVILEGES ON itflow.* TO 'itflow'@'localhost';"
-    mysql -e "FLUSH PRIVILEGES;"
+# Setup MariaDB
+setup_mariadb() {
+    log "MariaDB installation"
+    show_progress "12. MariaDB installation..."
+
+    if ! dpkg -l | grep -q mariadb-server || ! systemctl is-active --quiet mariadb; then
+        log "Error: MariaDB is not installed or not running."
+        echo -e "${RED}Error: MariaDB is not installed or not running.${NC}"
+        exit 1
+    fi
+
+    # Use expect to automate mysql_secure_installation
+    expect <<EOF >> "$LOG_FILE" 2>&1
+spawn mysql_secure_installation
+send "\r"
+send "n\r"
+send "y\r"
+send "$MARIADB_ROOT_PASSWORD\r"
+send "$MARIADB_ROOT_PASSWORD\r"
+send "y\r"
+send "y\r"
+send "y\r"
+send "y\r"
+expect eof
+EOF
+
+    # Check the previous execution
+    if [ $? -ne 0 ]; then
+        log "Error: mysql_secure_installation failed."
+        echo -e "${RED}Error: mysql_secure_installation failed.${NC}"
+        exit 1
+    fi
+
+    # Create the database and itflow user
+    mysql -u root -p"$MARIADB_ROOT_PASSWORD" -e "
+    CREATE DATABASE IF NOT EXISTS itflow CHARACTER SET utf8;
+    CREATE USER IF NOT EXISTS 'itflow'@'localhost' IDENTIFIED BY '${mariadbpwd}';
+    GRANT ALL PRIVILEGES ON itflow.* TO 'itflow'@'localhost';
+    FLUSH PRIVILEGES;" >> "$LOG_FILE" 2>&1
+
+    # Check the previous execution
+    if [ $? -ne 0 ]; then
+        log "Error: Failed to configure MariaDB."
+        echo -e "${RED}Error: Failed to configure MariaDB.${NC}"
+        exit 1
+    fi
+
+    log "MariaDB secured and configured."
+    echo -e "${GREEN}MariaDB secured and configured.${NC}"
 }
 
 # Welcome Message
 clear
-echo "#############################################"
-echo "# Welcome to the ITFlow Installation Script #"
-echo "#############################################"
-echo ""
-echo "Please follow the prompts to complete the installation."
-echo ""
+echo -e "${GREEN}#############################################${NC}"
+echo -e "${GREEN}# Welcome to the ITFlow Installation Script #${NC}"
+echo -e "${GREEN}#############################################${NC}"
+echo
+echo -e "${YELLOW}Please follow the prompts to complete the installation.${NC}"
+echo
 
 # Execution begins here
 check_root
 check_os
+install_packages
+check_required_binaries
 set_timezone
 get_domain
 generate_passwords
-
-echo -e "\n${GREEN}Step 2: Installing necessary packages...${NC}"
-install_packages
-
-echo -e "\n${GREEN}Step 3: Modifying PHP configurations...${NC}"
 modify_php_ini
-
-echo -e "\n${GREEN}Step 4: Setting up webroot...${NC}"
 setup_webroot
-
-echo -e "\n${GREEN}Step 5: Configuring Apache...${NC}"
 setup_apache
-
-echo -e "\n${GREEN}Step 6: Cloning ITFlow...${NC}"
 clone_itflow
-
-echo -e "\n${GREEN}Step 7: Setting up cron jobs...${NC}"
 setup_cronjobs
-
-echo -e "\n${GREEN}Step 8: Generating cron key file...${NC}"
 generate_cronkey_file
+setup_mariadb
 
-echo -e "\n${GREEN}Step 9: Setting up MySQL...${NC}"
-setup_mysql
-
-# Final message with clear instructions
-clear
-echo "######################################################"
-echo "# Installation Completed Successfully!               #"
-echo "######################################################"
-echo ""
+# Final message with instructions
+echo
+echo -e "${GREEN}######################################################${NC}"
+echo -e "${GREEN}# Installation Completed Successfully!               #${NC}"
+echo -e "${GREEN}######################################################${NC}"
+echo
 echo -e "Visit: ${GREEN}https://${domain}${NC} to complete the ITFlow setup."
-echo ""
+echo
 echo "Database setup details:"
 echo -e "Database User: ${GREEN}itflow${NC}"
 echo -e "Database Name: ${GREEN}itflow${NC}"
 echo -e "Database Password: ${GREEN}${mariadbpwd}${NC}"
-echo ""
+echo
+echo -e "Database ROOT Password: ${GREEN}${MARIADB_ROOT_PASSWORD}${NC}"
+echo
+echo -e "A detailed log file is available at: ${GREEN}$LOG_FILE${NC}"
