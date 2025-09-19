@@ -149,7 +149,7 @@ show_progress "Installing packages..."
     apt-get update && apt-get -y upgrade
     apt-get install -y apache2 mariadb-server \
         php libapache2-mod-php php-intl php-mysqli php-gd \
-        php-curl php-imap php-mailparse php-mbstring php-zip libapache2-mod-md \
+        php-curl php-mbstring php-zip \
         certbot python3-certbot-apache git sudo whois cron dnsutils openssl
 } & spin "Installing packages"
 
@@ -218,8 +218,8 @@ show_progress "Cloning ITFlow..."
 PHP_BIN=$(command -v php)
 cat <<EOF > /etc/cron.d/itflow
 0 2 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron.php
-* * * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_ticket_email_parser.php
-* * * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_mail_queue.php
+* * * * * www-data ${PHP_BIN} /var/www/${domain}/cron/ticket_email_parser.php
+* * * * * www-data ${PHP_BIN} /var/www/${domain}/cron/mail_queue.php
 0 3 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_domain_refresher.php
 0 4 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_certificate_refresher.php
 EOF
@@ -271,3 +271,4 @@ chmod 640 /var/www/${domain}/config.php
 show_progress "Installation Complete!"
 echo -e "Visit: ${GREEN}https://${domain}${NC}"
 echo -e "Log: ${GREEN}${LOG_FILE}${NC}"
+
