@@ -217,11 +217,11 @@ show_progress "Cloning ITFlow..."
 # Cron jobs
 PHP_BIN=$(command -v php)
 cat <<EOF > /etc/cron.d/itflow
-0 2 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron.php
+0 2 * * * www-data ${PHP_BIN} /var/www/${domain}/cron/cron.php
 * * * * * www-data ${PHP_BIN} /var/www/${domain}/cron/ticket_email_parser.php
 * * * * * www-data ${PHP_BIN} /var/www/${domain}/cron/mail_queue.php
-0 3 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_domain_refresher.php
-0 4 * * * www-data ${PHP_BIN} /var/www/${domain}/scripts/cron_certificate_refresher.php
+0 3 * * * www-data ${PHP_BIN} /var/www/${domain}/cron/domain_refresher.php
+0 4 * * * www-data ${PHP_BIN} /var/www/${domain}/cron/certificate_refresher.php
 EOF
 chmod 644 /etc/cron.d/itflow
 chown root:root /etc/cron.d/itflow
@@ -271,4 +271,7 @@ chmod 640 /var/www/${domain}/config.php
 show_progress "Installation Complete!"
 echo -e "Visit: ${GREEN}https://${domain}${NC}"
 echo -e "Log: ${GREEN}${LOG_FILE}${NC}"
+
+
+
 

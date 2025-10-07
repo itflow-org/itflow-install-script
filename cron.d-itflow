@@ -1,11 +1,12 @@
 # ITFlow Nightly 2 AM cron
-0 2 * * * www-data /usr/bin/php /var/www/itflow.example.com/scripts/cron.php 2>&1 | logger -t itflow-nightlycron
+0 2 * * * www-data /usr/bin/php /var/www/itflow.example.com/cron/cron.php 2>&1 | logger -t itflow-nightlycron
 
 # ITFlow Emails
 * * * * * www-data /usr/bin/php /var/www/itflow.example.com/cron/mail_queue.php 2>&1 | logger -t itflow-smtp
 * * * * * www-data /usr/bin/php /var/www/itflow.example.com/cron/ticket_email_parser.php 2>&1 | logger -t itflow-imap
 
 # ITFlow data refresh
-0 3 * * * www-data /usr/bin/php /var/www/itflow.example.com/scripts/cron_domain_refresher.php 2>&1 | logger -t itflow-domains
-0 4 * * * www-data /usr/bin/php /var/www/itflow.example.com/scripts/cron_certificate_refresher.php 2>&1 | logger -t itflow-certs
+0 3 * * * www-data /usr/bin/php /var/www/itflow.example.com/cron/domain_refresher.php 2>&1 | logger -t itflow-domains
+0 4 * * * www-data /usr/bin/php /var/www/itflow.example.com/cron/certificate_refresher.php 2>&1 | logger -t itflow-certs
+
 
