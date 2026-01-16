@@ -23,6 +23,12 @@ set -euo pipefail
 # - Fix Apache FQDN warning by setting global ServerName
 # - Reboot prompt (Enter = YES), strict Y/n parsing, EXIT after reboot
 #
+# Hardening / gotchas (php-fpm mode):
+# - Deny PHP execution from /uploads at the vhost level
+# - Strip mod_php-only directives from uploads/.htaccess (prevents 500s)
+# - Warn if other .htaccess files still contain php_flag/php_value/php_admin_*
+# - Localhost smoke test to catch 500s immediately
+#
 # Cloudflare DNS-01 token permissions:
 # - Zone:DNS:Edit (required)
 # - Zone:Read (nice-to-have)
@@ -471,6 +477,13 @@ say "Configuring Apache HTTP vhost..."
   RewriteCond %{HTTPS} !=on
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]" )
 
+  # Security hardening: NEVER execute PHP from uploads
+  <Directory ${WEBROOT}/uploads>
+    <FilesMatch "\.php$">
+      Require all denied
+    </FilesMatch>
+  </Directory>
+
   <Directory ${WEBROOT}>
     AllowOverride All
     Require all granted
@@ -612,6 +625,13 @@ EOF
   ServerName ${domain}
   DocumentRoot ${WEBROOT}
 
+  # Security hardening: NEVER execute PHP from uploads
+  <Directory ${WEBROOT}/uploads>
+    <FilesMatch "\.php$">
+      Require all denied
+    </FilesMatch>
+  </Directory>
+
   SSLEngine on
   SSLCertificateFile ${FULLCHAIN}
   SSLCertificateKeyFile ${PRIVKEY}
@@ -641,6 +661,13 @@ elif [[ "$ssl_type" == "selfsigned" ]]; then
 <VirtualHost *:443>
   ServerName ${domain}
   DocumentRoot ${WEBROOT}
+
+  # Security hardening: NEVER execute PHP from uploads
+  <Directory ${WEBROOT}/uploads>
+    <FilesMatch "\.php$">
+      Require all denied
+    </FilesMatch>
+  </Directory>
 
   SSLEngine on
   SSLCertificateFile /etc/ssl/certs/${domain}.crt
@@ -678,6 +705,29 @@ say "Cloning ITFlow..."
 
   git clone --branch "$branch" https://github.com/itflow-org/itflow.git "$WEBROOT"
   chown -R www-data:www-data "$WEBROOT"
+
+  # php-fpm mode gotcha:
+  # mod_php-only directives in uploads/.htaccess can cause Apache HTTP 500 for images/assets.
+  # Only patch uploads/.htaccess automatically; warn about other hits elsewhere.
+  if [[ "$perf_profile" == "high" && -f "${WEBROOT}/uploads/.htaccess" ]]; then
+    sed -i \
+      -e '/^[[:space:]]*php_flag[[:space:]]/d' \
+      -e '/^[[:space:]]*php_value[[:space:]]/d' \
+      -e '/^[[:space:]]*php_admin_value[[:space:]]/d' \
+      -e '/^[[:space:]]*php_admin_flag[[:space:]]/d' \
+      -e '/^[[:space:]]*RemoveHandler[[:space:]]/d' \
+      -e '/^[[:space:]]*RemoveType[[:space:]]/d' \
+      "${WEBROOT}/uploads/.htaccess"
+  fi
+
+  if [[ "$perf_profile" == "high" ]]; then
+    hits="$(grep -RIn --exclude-dir=.git -E '^[[:space:]]*php_(flag|value|admin_flag|admin_value)\b' "$WEBROOT" || true)"
+    if [[ -n "$hits" ]]; then
+      warn "Detected mod_php directives in .htaccess under ${WEBROOT} (php-fpm mode may 500 on these paths):"
+      echo "$hits" | tee -a "$LOG_FILE" || true
+      warn "Consider removing/relocating these directives (php-fpm uses php.ini / pool config instead)."
+    fi
+  fi
 } & spin "Cloning ITFlow"
 
 # -------------------------
@@ -1121,6 +1171,26 @@ if [[ "$ssl_type" == "letsencrypt" || "$ssl_type" == "letsencrypt-dns-cloudflare
   say "Testing certbot renewal (dry-run)..."
   certbot renew --dry-run || warn "certbot renew --dry-run failed (non-fatal)."
 fi
+
+# -------------------------
+# Post-install localhost smoke test (catches 500s immediately)
+# -------------------------
+say "Post-install smoke test (HTTP)..."
+{
+  code="000"
+  if [[ "$ssl_type" != "none" ]]; then
+    code="$(curl -k -s -o /dev/null -w '%{http_code}' "https://localhost/" || true)"
+  else
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost/" || true)"
+  fi
+
+  if [[ "$code" != "200" && "$code" != "302" && "$code" != "303" ]]; then
+    warn "Smoke test got HTTP ${code} from localhost. Check Apache logs and vhost/TLS settings."
+    warn "Logs: /var/log/apache2/${domain}-error.log and ${domain}-ssl-error.log"
+  else
+    say "Smoke test OK (HTTP ${code})."
+  fi
+} & spin "Smoke test"
 
 # -------------------------
 # Health summary
