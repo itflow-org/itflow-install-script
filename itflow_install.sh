@@ -163,7 +163,7 @@ sed -i 's/^;\?max_execution_time =.*/max_execution_time = 300/' "$PHP_INI_PATH"
 # Apache setup
 show_progress "Configuring Apache..."
 {
-    a2enmod md ssl rewrite
+    a2enmod ssl rewrite
     mkdir -p /var/www/${domain}
 
     cat <<EOF > /etc/apache2/sites-available/${domain}.conf
